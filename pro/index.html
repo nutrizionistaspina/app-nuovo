@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self' https://uqpijskisejctcltmpdv.supabase.co https://yqmdpduabrkvbsxagwdj.supabase.co https://huggingface.co https://*.huggingface.co https://*.hf.co; media-src 'self' data: blob:; worker-src 'self' blob:; form-action 'self'">
+<meta name="author" content="Dott. Federico Spina, biologo nutrizionista">
+<meta name="copyright" content="© 2026 Dott. Federico Spina, biologo nutrizionista">
+
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1A1A17">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>NutriLab Pro</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="NutriLab Pro">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+:root{--g-ink:#1A1A17;--g-rose:#B8686A;--g-rose2:#F4E4E2;--g-bg:#FBF9F5;--g-muted:#79766F;--g-line:#E7E1D4}
+@media (prefers-color-scheme:dark){:root{--g-ink:#F1EEE8;--g-rose:#D58C8E;--g-rose2:#3A2A2A;--g-bg:#151513;--g-muted:#A19D95;--g-line:#2F2D29}}
+html,body{margin:0;background:var(--g-bg);color:var(--g-ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;-webkit-text-size-adjust:100%}
+.g-in{min-height:100dvh;display:grid;align-content:center;gap:14px;padding:28px 24px;max-width:460px;margin:0 auto;box-sizing:border-box}
+.g-in h1{font:400 30px/1.15 Georgia,"Times New Roman",serif;margin:0}
+.g-in h1 i{color:var(--g-rose)}
+.g-in p{margin:0;color:var(--g-muted)}
+.g-chip{justify-self:start;font:700 11px Arial,sans-serif;background:var(--g-rose2);color:var(--g-rose);border-radius:999px;padding:4px 9px}
+.g-btn{justify-self:start;font:inherit;border:1px solid var(--g-line);background:none;color:inherit;border-radius:999px;padding:10px 18px;cursor:pointer}
+.g-att{text-align:center;color:var(--g-muted);margin:40px 10px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+/* NutriLab Pro · ingresso.
+   In questa pagina non c'è l'app: c'è solo il riconoscimento del telefono. L'app arriva dal server dello studio,
+   solo ai telefoni collegati dal Dottore, e resta in copia su questo telefono per le aperture successive. */
+(function () {
+  'use strict';
+  var FN = 'https://uqpijskisejctcltmpdv.supabase.co/functions/v1/nl-pro', OGNI = 6 * 36e5;
+  var LS = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* senza spazio: si riscarica la prossima volta */ } },
+    del: function (k) { try { localStorage.removeItem(k); } catch (e) { /* niente */ } }
+  };
+  var root = document.getElementById('root');
+  /* chiave del dispositivo: arriva una volta dal link di NutriLab (#k=…) e resta sul telefono */
+  var m = location.hash.match(/k=([A-Za-z0-9]{20,64})/);
+  if (m) { LS.set('nlpro_key', m[1]); history.replaceState(null, '', location.pathname); }
+  var key = LS.get('nlpro_key') || '';
+
+  function ingresso(titolo, testo, riprova) {
+    root.innerHTML = '<div class="g-in"><span class="g-chip">NutriLab Pro</span><h1>' + titolo + '</h1><p>' + testo + '</p>' + (riprova ? '<button class="g-btn" type="button" id="g-riprova">Riprova</button>' : '') + '</div>';
+    var b = document.getElementById('g-riprova'); if (b) b.onclick = function () { location.reload(); };
+  }
+  function collega() {
+    LS.del('nlpro_app'); LS.del('nlpro_app_t');
+    ingresso('Collega <i>questo telefono</i>', 'Apri il link che trovi in NutriLab → Tasca → App pro → «Link per il telefono». Il link contiene la chiave del dispositivo e serve solo la prima volta.');
+  }
+  function chiedi() {
+    return fetch(FN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-pro-key': key }, body: JSON.stringify({ a: 'file', k: 'pro-app' }) }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || ('http ' + r.status)); e.status = r.status; throw e; } return j; });
+    });
+  }
+  function testo(b64) {
+    var u = Uint8Array.from(atob(b64), function (c) { return c.charCodeAt(0); });
+    if (u[0] === 123) return Promise.resolve(new TextDecoder().decode(u));
+    return new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+  }
+  function valida(t) {
+    var B = JSON.parse(t);
+    if (!B || B.v !== 1 || typeof B.css !== 'string' || !Array.isArray(B.js) || !B.js.length || B.js.some(function (x) { return typeof x !== 'string'; })) throw new Error('formato');
+    return B;
+  }
+  function avvia(B) {
+    var st = document.createElement('style'); st.textContent = B.css; document.head.appendChild(st);
+    root.innerHTML = '';
+    B.js.forEach(function (c) { var s = document.createElement('script'); s.textContent = c; document.body.appendChild(s); });
+  }
+  function scarica() {
+    return chiedi().then(function (j) {
+      if (!j || typeof j.b64 !== 'string') throw new Error('vuoto');
+      return testo(j.b64).then(function (t) {
+        valida(t);
+        var c = { n: String(j.nome || ''), j: t };
+        LS.set('nlpro_app', JSON.stringify(c)); LS.set('nlpro_app_t', String(Date.now()));
+        return c;
+      });
+    });
+  }
+
+  if (!key) return collega();
+  var copia = null, B = null;
+  try { copia = JSON.parse(LS.get('nlpro_app') || 'null'); } catch (e) { copia = null; }
+  if (copia && typeof copia.j === 'string') { try { B = valida(copia.j); } catch (e) { B = null; LS.del('nlpro_app'); } }
+  if (B) {
+    avvia(B);
+    /* in sottofondo: se sul server c'è una versione nuova dell'app, la tengo per la prossima apertura */
+    if (Date.now() - (+LS.get('nlpro_app_t') || 0) > OGNI) setTimeout(function () { scarica().catch(function () { /* si riprova alla prossima apertura */ }); }, 4000);
+    return;
+  }
+  root.innerHTML = '<p class="g-att">Carico…</p>';
+  scarica().then(function (c) { avvia(valida(c.j)); }).catch(function (e) {
+    if (e && e.status === 401) { LS.del('nlpro_key'); key = ''; return collega(); }
+    if (e && e.status === 404) return ingresso('App <i>non trovata</i>', 'Sul server dello studio l\'app non c\'è ancora: va caricata una volta.', true);
+    ingresso('Serve <i>la rete</i>', 'La prima volta l\'app si scarica dal server dello studio. Controlla la connessione e riprova.', true);
+  });
+})();
+</script>
+</body>
+</html>
