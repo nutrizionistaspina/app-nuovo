@@ -7,8 +7,9 @@
    - La scala viene dall'altezza: dalla cima della testa ai talloni. Vita (ombelico) e fianchi (punto più largo) si leggono dalla
      maschera come larghezza (di fronte) e profondità (di profilo); la circonferenza è un'ellisse (Ramanujan), corretta dalla taratura
      dello studio quando ci sono abbastanza misure con il metro.
-   - Formule: RFM (Woolcott e Bergman 2018, validata sulla DXA, adulti), Navy (Hodgdon e Beckett 1984, solo con il collo al metro),
-     vita/altezza, vita/fianchi. Sotto i 18 anni le percentuali non si calcolano (formule non validate).
+   - Formule: RFM (Woolcott e Bergman 2018, validata sulla DXA negli adulti; la stessa equazione vale dai 15 ai 19 anni) e RFMp tra
+     8 e 14 anni (Woolcott e Bergman 2019); sotto gli 8 anni niente percentuale. Navy (Hodgdon e Beckett 1984) solo negli adulti e con
+     il collo al metro. Vita/altezza e vita/fianchi. La taratura verso la BIA dello studio si applica solo agli adulti.
    - Taratura: retta ai minimi quadrati tra la stima e il riferimento dello studio (metro, BIA), con errore medio stimato
      lasciando fuori una misura alla volta. Si usa da 10 coppie in su.
    Nessuna dipendenza: funziona nel browser (window.FC) e in Node per i test (module.exports). */
@@ -20,8 +21,9 @@
 
   /* ---------------- formule */
   FC.ellipse = (W, D) => { if (!(W > 0 && D > 0)) return null; const a = W / 2, b = D / 2; return Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b))); };
-  /* RFM = 64 − 20 × altezza/vita + 12 × sesso (0 uomo, 1 donna) */
-  FC.rfm = (h, w, sx) => (h > 0 && w > 0 && (sx === 'F' || sx === 'M')) ? 64 - 20 * h / w + (sx === 'F' ? 12 : 0) : null;
+  /* RFM = 64 − 20 × altezza/vita + 12 × sesso (0 uomo, 1 donna), adulti e 15-19 anni; RFMp = 74 − 22 × altezza/vita + 5 × sesso, 8-14 anni */
+  FC.rfm = (h, w, sx, age) => { if (!(h > 0 && w > 0 && (sx === 'F' || sx === 'M'))) return null; const f = sx === 'F' ? 1 : 0;
+    if (age != null && age < 8) return null; if (age != null && age < 15) return 74 - 22 * h / w + 5 * f; return 64 - 20 * h / w + 12 * f; };
   /* Navy, centimetri: uomo con vita e collo, donna con vita, fianchi e collo */
   FC.navy = (sx, h, w, neck, hip) => { const L = Math.log10; if (!(h > 0 && w > 0 && neck > 0)) return null;
     if (sx === 'M') return w - neck > 0 ? 495 / (1.0324 - 0.19077 * L(w - neck) + 0.15456 * L(h)) - 450 : null;
@@ -32,8 +34,8 @@
   FC.indices = (o) => { const h = num(o.h), w = num(o.wst), hp = num(o.hip), nk = num(o.neck), kg = num(o.kg), age = num(o.age), r = { warn: [] };
     if (w && h) r.whtr = Math.round(w / h * 100) / 100;
     if (w && hp) r.whr = Math.round(w / hp * 100) / 100;
-    const adult = age == null || age >= 18; if (!adult) r.warn.push('minore');
-    if (adult && w && h) r.rfm = bfOk(o.cal && o.cal.bf ? FC.cal(FC.rfm(h, w, o.sx), o.cal.bf) : FC.rfm(h, w, o.sx));
+    const adult = age == null || age >= 18, kid = age != null && age < 8; if (kid) r.warn.push('minore'); else if (age != null && age < 15) r.warn.push('ped');
+    if (!kid && w && h) { const raw = FC.rfm(h, w, o.sx, age); r.rfm = bfOk(adult && o.cal && o.cal.bf ? FC.cal(raw, o.cal.bf) : raw); }
     if (adult && nk && w && h) r.navy = bfOk(FC.navy(o.sx, h, w, nk, hp));
     if (r.rfm != null && kg) { r.fmKg = Math.round(kg * r.rfm) / 100; r.ffmKg = Math.round((kg - kg * r.rfm / 100) * 10) / 10; }
     return r; };
@@ -170,7 +172,7 @@
   /* modello manuale quando la sagoma non si trova: linee a metà, da trascinare */
   FC.manual = (w, h) => { const top = Math.round(h * 0.08), bot = Math.round(h * 0.92), H = bot - top, cx = Math.round(w / 2);
     return { top, bot, cx, lv: { waist: { y: Math.round(bot - 0.6 * H), x0: Math.round(cx - 0.09 * H), x1: Math.round(cx + 0.09 * H), man: true }, hip: { y: Math.round(bot - 0.5 * H), x0: Math.round(cx - 0.1 * H), x1: Math.round(cx + 0.1 * H), man: true } }, warn: ['manuale'], face: 1 }; };
-  FC.WARN = { braccia: 'Le braccia sembrano attaccate ai fianchi: staccale un po\' nella foto di fronte.', vita: 'La vita trovata è troppo larga: controlla la linea rossa.', piedi: 'Tieni i piedi uniti: con le gambe aperte i fianchi si leggono male. Rifai la foto di fronte.', fianchi: 'La linea blu dei fianchi era sulle gambe: l\'ho riportata sul bacino, controllala.', manuale: 'Non ho trovato la sagoma: sposta tu le linee sui bordi del corpo.', minore: 'Sotto i 18 anni la percentuale di grasso non si calcola: le formule non sono validate.' };
+  FC.WARN = { braccia: 'Le braccia sembrano attaccate ai fianchi: staccale un po\' nella foto di fronte.', vita: 'La vita trovata è troppo larga: controlla la linea rossa.', piedi: 'Tieni i piedi uniti: con le gambe aperte i fianchi si leggono male. Rifai la foto di fronte.', fianchi: 'La linea blu dei fianchi era sulle gambe: l\'ho riportata sul bacino, controllala.', manuale: 'Non ho trovato la sagoma: sposta tu le linee sui bordi del corpo.', minore: 'Sotto gli 8 anni la percentuale di grasso non si calcola: a questa età la stima non è affidabile.', ped: 'Tra 8 e 14 anni la percentuale di grasso si calcola con la formula per l\'età.' };
   FC.TIPS = 'Vestiti aderenti, capelli raccolti, piedi uniti. Di fronte: braccia un po\' staccate dal corpo. Di profilo: braccia lungo il corpo, dentro la sagoma. Sfondo chiaro, telefono in verticale all\'altezza della pancia, a 2-3 metri, tutto il corpo nella foto.';
 
   if (typeof module === 'object' && module.exports) module.exports = FC; else root.FC = FC;

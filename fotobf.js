@@ -7,17 +7,19 @@
      circonferenze come ellisse, corrette dalla taratura dello studio (hd.fcal: foto → metro, RFM → BIA) quando il Dottore la attiva.
    - Le foto non escono dal telefono e si cancellano dopo il calcolo. Resta solo il contorno della sagoma di profilo, sul telefono, per
      vedere le differenze tra una volta e l'altra: in grigio la precedente, linea rossa la nuova, insieme alle sagome delle visite in studio
-     (hd.fsil). Al Dottore vanno solo vita e percentuale, se il paziente sceglie di inviarle. Sotto i 18 anni (hd.fmin) niente percentuale.
+     (hd.fsil). Al Dottore vanno solo vita e percentuale, se il paziente sceglie di inviarle. Sotto i 18 anni NutriLab manda l'età (hd.fage):
+     RFM dai 15 anni, formula pediatrica tra 8 e 14, niente percentuale sotto gli 8, taratura sulla BIA solo per gli adulti.
+     Nell'app non compaiono fonti né nomi di formule.
    - Alimentazione dai tracker: media giornaliera di energia, proteine, carboidrati, grassi, fibre e acqua letta dall'app che il paziente
      usa per registrare i pasti (anche tramite l'app Salute), insieme ai dati della settimana. */
 'use strict';
 const FB = { mode: 'metro', img: { f: null, s: null }, det: { f: null, s: null }, g: { f: null, s: null }, busy: { f: '', s: '' }, cam: null, res: null, err: '', msg: '', sending: false, h: '', sx: '', w: '', open: false, cmp: { a: '', b: '' }, kept: false, mem: [] };
 const FB_MP = ['vendor/mp-pose/'];
-const fbOn = () => !!(A.P?.hd?.foto);
-const nutOn = () => !!(A.P?.hd?.nut);
-const fbMinor = () => !!(A.P?.hd?.fmin);
-const fbCal = () => { const c = A.P?.hd?.fcal; return c && typeof c === 'object' ? c : null; };
 const fbNum = (x) => FC.num(x);
+const fbOn = () => !!(A.P?.hd?.foto) && typeof FC === 'object';
+const nutOn = () => !!(A.P?.hd?.nut);
+const fbAge = () => { const a = fbNum(A.P?.hd?.fage); return a != null && a >= 0 && a < 18 ? a : null; };
+const fbCal = () => { const c = A.P?.hd?.fcal; return c && typeof c === 'object' ? c : null; };
 const fbFd = (s) => { try { return new Date(String(s).slice(0, 10) + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) { return s; } };
 const fbN = (v, d) => (v == null || !isFinite(v) ? '—' : Number(v).toLocaleString('it-IT', { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 }));
 /* ---- sagome salvate sul telefono (solo il contorno, mai la foto) */
@@ -29,13 +31,13 @@ function fbAll() { const S0 = (A.P?.hd?.fsil || []).filter((e) => e && e.p && e.
 /* ---- calcolo */
 function fbCheck() { const hcm = fbNum(FB.h), sx = FB.sx; if (!hcm || hcm < 120 || hcm > 220) return 'Scrivi l\'altezza in centimetri.'; if (sx !== 'F' && sx !== 'M') return 'Scegli il sesso per il calcolo.'; return ''; }
 function fbMetro() { FB.err = fbCheck(); FB.res = null; if (FB.err) return; const w = fbNum(FB.w); if (!w || w < 50 || w > 180) { FB.err = 'Scrivi la circonferenza della vita in centimetri (50-180).'; return; }
-  const I = FC.indices({ h: fbNum(FB.h), sx: FB.sx, wst: w, age: fbMinor() ? 17 : null, cal: fbCal() && fbCal().bf ? { bf: fbCal().bf } : null });
-  FB.res = { how: 'metro', w: Math.round(w * 10) / 10, bf: I.rfm ?? null, whtr: I.whtr ?? null, at: new Date().toISOString() }; }
+  const I = FC.indices({ h: fbNum(FB.h), sx: FB.sx, wst: w, age: fbAge(), cal: fbCal() && fbCal().bf ? { bf: fbCal().bf } : null });
+  FB.res = { how: 'metro', w: Math.round(w * 10) / 10, bf: I.rfm ?? null, at: new Date().toISOString() }; }
 function fbFoto() { FB.res = null; if (!FB.g.f || !FB.g.s) return; FB.err = fbCheck(); if (FB.err) return; const hcm = fbNum(FB.h), c = fbCal();
   const mf = FC.measure(FB.g.f, hcm), ms = FC.measure(FB.g.s, hcm), C = FC.circ(mf, ms, c ? { waist: c.waist, hip: c.hip } : null);
   if (!C || !C.ok) { FB.err = 'Le misure non tornano: controlla che le linee rossa e blu tocchino i bordi del corpo nelle due foto.'; return; }
-  const I = FC.indices({ h: hcm, sx: FB.sx, wst: C.waist, hip: C.hip, age: fbMinor() ? 17 : null, cal: c && c.bf ? { bf: c.bf } : null });
-  FB.res = { how: 'foto', w: C.waist, hp: C.hip, bf: I.rfm ?? null, whtr: I.whtr ?? null, whr: I.whr ?? null, cal: !!(c && (FC.calOk(c.waist) || FC.calOk(c.bf))), at: new Date().toISOString() }; }
+  const I = FC.indices({ h: hcm, sx: FB.sx, wst: C.waist, hip: C.hip, age: fbAge(), cal: c && c.bf ? { bf: c.bf } : null });
+  FB.res = { how: 'foto', w: C.waist, hp: C.hip, bf: I.rfm ?? null, cal: !!(c && (FC.calOk(c.waist) || FC.calOk(c.hip))), at: new Date().toISOString() }; }
 /* foto (canvas) → sagoma sul telefono; se il modello non parte, linee a mano */
 async function fbDetect(k, cv) { FB.img[k] = cv; FB.det[k] = null; FB.g[k] = null; FB.res = null; FB.err = ''; FB.msg = ''; FB.kept = false;
   FB.busy[k] = 'Cerco la sagoma… la prima volta scarica il modello (circa 12 MB): meglio con il Wi-Fi.'; render();
@@ -62,19 +64,19 @@ function fbCmp() { const L = fbAll(); if (!L.length) return ''; const key = (e) 
   return `<div class="fbcmp"><b>Le tue sagome di profilo</b><div class="fbsvg">${FC.overlaySvg(a, b, { label: 'Confronto tra due sagome di profilo' })}</div>
     ${a ? `<p class="small">In grigio ${opt(a, 'a')}</p><p class="small">Linea rossa ${opt(b, 'b')}</p><p class="small muted">Dove la linea rossa sta dentro il grigio, il profilo si è ridotto; dove esce, è cresciuto. Le sagome sono messe alla stessa altezza.</p>${diffs ? `<ul class="small">${diffs}</ul>` : ''}`
       : `<p class="small muted">Sagoma del ${esc(lab(b))}: il confronto compare dalla seconda.</p>`}</div>`; }
-function fbCard() { if (!fbOn()) return ''; const r = FB.res, minor = fbMinor(), sxRadio = (v, l) => `<label class="check" style="display:inline-flex;margin-right:14px"><input type="radio" name="fbsx" data-fbsx="${v}"${FB.sx === v ? ' checked' : ''}> ${l}</label>`;
+function fbCard() { if (!fbOn()) return ''; const r = FB.res, age = fbAge(), sxRadio = (v, l) => `<label class="check" style="display:inline-flex;margin-right:14px"><input type="radio" name="fbsx" data-fbsx="${v}"${FB.sx === v ? ' checked' : ''}> ${l}</label>`;
   const anyImg = FB.img.f || FB.img.s;
   return `<details class="card fbcard"${FB.open ? ' open' : ''} data-fbdet><summary><b>Composizione corporea</b> <small class="muted">facoltativa</small></summary>
-   <p class="small muted">Con altezza e vita si ottiene una stima della massa grassa (RFM); dalle foto anche i fianchi e la sagoma di profilo da confrontare nel tempo. È indicativa: non sostituisce le misure in studio.</p>
+   <p class="small muted">Con altezza e vita si ottiene una stima della massa grassa; dalle foto anche i fianchi e la sagoma di profilo da confrontare nel tempo. È indicativa: non sostituisce le misure in studio.</p>
    <label class="hdf"><span>Altezza</span><span><input inputmode="decimal" data-fbh value="${esc(FB.h)}" placeholder="165"> <small>cm</small></span></label>
    <div style="margin:6px 0">${sxRadio('F', 'Donna')}${sxRadio('M', 'Uomo')}</div>
    <div class="seg" role="group" aria-label="Come misuri la vita"><button class="btn sm${FB.mode === 'metro' ? ' primary' : ''}" data-fb="mode" data-v="metro" aria-pressed="${FB.mode === 'metro'}">Con il metro</button><button class="btn sm${FB.mode === 'foto' ? ' primary' : ''}" data-fb="mode" data-v="foto" aria-pressed="${FB.mode === 'foto'}">Dalle foto</button></div>
    ${FB.mode === 'metro' ? `<p class="small muted">In piedi, a fine espirazione, metro orizzontale appena sopra le ossa del bacino (all'altezza dell'ombelico se non le senti).</p><label class="hdf"><span>Vita</span><span><input inputmode="decimal" data-fbw value="${esc(FB.w)}" placeholder="85"> <small>cm</small></span></label><div class="row"><button class="btn primary" data-fb="calc">Calcola</button></div>`
     : `<p class="small muted">${esc(FC.TIPS)} Le foto restano solo qui e si cancellano dopo il calcolo: sul telefono resta il contorno del profilo, senza volto.</p>${fbShot('f', 'Di fronte')}${fbShot('s', 'Di profilo')}`}
-   ${minor ? `<p class="small muted">${esc(FC.WARN.minore)}</p>` : ''}
+   ${age != null && age < 15 ? `<p class="small muted">${esc(FC.WARN[age < 8 ? 'minore' : 'ped'])}</p>` : ''}
    ${FB.err ? `<div class="alert" role="alert">${esc(FB.err)}</div>` : ''}
-   ${r ? `<div class="fbres"><div><small>Vita ${r.how === 'foto' ? 'stimata' : 'misurata'}</small><b>${fbN(r.w, r.how === 'foto' ? 0 : 1)} cm</b></div>${r.hp != null ? `<div><small>Fianchi stimati</small><b>${fbN(r.hp)} cm</b></div>` : ''}${r.bf != null ? `<div><small>Massa grassa stimata</small><b>${fbN(r.bf, 1)}%</b></div>` : ''}${r.whtr != null ? `<div><small>Vita / altezza</small><b>${fbN(r.whtr, 2)}</b></div>` : ''}</div>
-     <p class="small muted">${r.how === 'foto' ? `Dalle foto l'errore può essere di qualche centimetro su vita e fianchi${r.cal ? ', già corretto con le misure dello studio' : ''}.` : 'La formula ha un margine di alcuni punti percentuali anche con la vita misurata bene.'} Vita/altezza sotto 0,5 è il valore che di solito si cerca. Il Dottore la confronterà con le misure dello studio.</p>
+   ${r ? `<div class="fbres"><div><small>Vita ${r.how === 'foto' ? 'stimata' : 'misurata'}</small><b>${fbN(r.w, r.how === 'foto' ? 0 : 1)} cm</b></div>${r.hp != null ? `<div><small>Fianchi stimati</small><b>${fbN(r.hp)} cm</b></div>` : ''}${r.bf != null ? `<div><small>Massa grassa stimata</small><b>${fbN(r.bf, 1)}%</b></div>` : ''}</div>
+     <p class="small muted">${r.how === 'foto' ? `Dalle foto l'errore può essere di qualche centimetro su vita e fianchi${r.cal ? ', già corretto con le misure dello studio' : ''}.` : 'La formula ha un margine di alcuni punti percentuali anche con la vita misurata bene.'} Il Dottore la confronterà con le misure dello studio.</p>
      <div class="row">${r.how === 'foto' && anyImg ? `<button class="btn primary" data-fb="keep">Salva il profilo e cancella le foto</button>` : ''}<button class="btn" data-fb="send"${FB.sending ? ' disabled' : ''}>${FB.sending ? 'Invio…' : 'Invia al Dottore'}</button></div>`
     : anyImg ? `<div class="row"><button class="btn sm" data-fb="clear">Cancella le foto</button></div>` : ''}
    ${FB.msg ? `<p class="small"><b>${esc(FB.msg)}</b></p>` : ''}
