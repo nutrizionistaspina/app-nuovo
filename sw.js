@@ -1,8 +1,8 @@
 /* Service worker dell'app dei pazienti: tiene sul telefono la pagina, il manifest e le icone, così l'app si apre anche
    senza rete. Non tocca i dati: le chiamate all'archivio (Supabase) e le pagine dei pagamenti passano sempre dalla rete.
    La pagina si aggiorna dalla rete quando c'è (rete prima, copia salvata se manca). */
-const V = 'nlp-v1';
-const CORE = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon.svg', 'fotobf.js'];
+const V = 'nlp-v2';
+const CORE = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon.svg', 'fotocomp.js', 'fotobf.js'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith('nlp-') && k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 const ROOT = new URL('./', self.registration.scope).pathname;
