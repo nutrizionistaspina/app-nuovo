@@ -1,0 +1,2 @@
+MediaPipe Pose 0.5.1675469404 (npm @mediapipe/pose), Google LLC, licenza Apache 2.0: https://www.apache.org/licenses/LICENSE-2.0
+Usato sul dispositivo per trovare la sagoma nella valutazione con le foto (fotocomp.js). Nessun dato esce dal telefono.
