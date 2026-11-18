@@ -7,7 +7,8 @@
      circonferenze come ellisse, corrette dalla taratura dello studio (hd.fcal: foto → metro, RFM → BIA) quando il Dottore la attiva.
    - Le foto non escono dal telefono e si cancellano dopo il calcolo. Resta solo il contorno della sagoma di profilo, sul telefono, per
      vedere le differenze tra una volta e l'altra: in grigio la precedente, linea rossa la nuova, insieme alle sagome delle visite in studio
-     (hd.fsil). Al Dottore vanno solo vita e percentuale, se il paziente sceglie di inviarle. Sotto i 18 anni NutriLab manda l'età (hd.fage):
+     (hd.fsil). Se il paziente sceglie di inviarle, al Dottore vanno vita e percentuale (tipo «salute») e, dalle foto, anche fianchi e
+     contorno del profilo (tipo «sagoma», approvato dal Dottore il 18/11/2026): mai le foto. Sotto i 18 anni NutriLab manda l'età (hd.fage):
      RFM dai 15 anni, formula pediatrica tra 8 e 14, niente percentuale sotto gli 8, taratura sulla BIA solo per gli adulti.
      Nell'app non compaiono fonti né nomi di formule.
    - Alimentazione dai tracker: media giornaliera di energia, proteine, carboidrati, grassi, fibre e acqua letta dall'app che il paziente
@@ -48,7 +49,7 @@ async function fbDetect(k, cv) { FB.img[k] = cv; FB.det[k] = null; FB.g[k] = nul
 function fbForget() { FB.img = { f: null, s: null }; FB.det = { f: null, s: null }; FB.g = { f: null, s: null }; FB.busy = { f: '', s: '' }; }
 /* salva il contorno del profilo e i numeri sul telefono, poi cancella le foto */
 function fbKeep() { const r = FB.res; if (!r) return; let sil = null; try { const d = FB.det.s; if (d && d.m) sil = FC.silhouette(d.m, d.w, d.h, FB.g.s, d.lm); } catch (e) { console.warn('sagoma', e); }
-  if (sil) { const L = fbLocal(), id = 'c' + Date.now().toString(36); L.push({ id, d: addDays(0), at: r.at, p: sil.p, w: r.w, hp: r.hp, bf: r.bf }); fbLocalPut(L); FB.cmp = { a: '', b: 'casa:' + id }; }
+  const e = { id: 'c' + Date.now().toString(36), d: addDays(0), at: r.at, w: r.w, hp: r.hp, bf: r.bf }; if (sil) { e.p = sil.p; const L = fbLocal(); L.push(e); fbLocalPut(L); FB.cmp = { a: '', b: 'casa:' + e.id }; } FB.last = e;
   FB.kept = true; fbForget(); FB.msg = sil ? 'Foto cancellate. Sul telefono resta solo il contorno del profilo, per il confronto.' : 'Foto cancellate. Il contorno del profilo non si è potuto salvare (sagoma non trovata).'; }
 /* ---- scheda */
 function fbShot(k, l) { const w = FB.g[k]?.warn || [];
@@ -96,9 +97,16 @@ async function fbShoot() { const c = FB.cam; if (!c) return; const v = c.v, k = 
 /* editor delle linee dopo ogni render */
 function fbMount() { document.querySelectorAll('[data-fbed]').forEach((host) => { const k = host.dataset.fbed, cv = FB.img[k], g = FB.g[k]; if (!cv || !g) return;
     FC.editor(host, { img: cv, g, m: FB.det[k]?.m, onChange: (_, end) => { if (end) { fbFoto(); render(); } } }); }); }
+/* contorno da inviare: interi, pari, al massimo 1600 numeri e 11.000 caratteri (limiti della funzione del sito) */
+function fbShrink(p) { let q = (p || []).map((v) => Math.round(+v) || 0), eps = 2; while ((q.length > 1600 || JSON.stringify(q).length > 11000) && eps < 200) { const P = []; for (let i = 0; i + 1 < q.length; i += 2) P.push([q[i], q[i + 1]]); q = FC.simplify(P, eps).flat(); eps *= 1.6; } return q.length >= 12 && q.length % 2 === 0 ? q : null; }
 async function fbSend() { const r = FB.res; if (!r) return; if (A.P.demo) { FB.msg = 'Nell\'esempio i dati non partono.'; return render(); }
+  if (r.how === 'foto' && (FB.img.f || FB.img.s)) fbKeep(); /* prima salva il contorno e cancella le foto */
   FB.sending = true; FB.msg = ''; render(); const pl = { from: addDays(0), to: addDays(0), src: r.how === 'foto' ? 'foto' : 'metro', wst: Math.round(r.w) }; if (r.bf != null) pl.bfr = r.bf;
-  try { await rpc('nl_app_data_add', { p_id: SID(), p_tok: A.P.tok, p_kind: 'salute', p_payload: pl }); FB.msg = 'Inviata al Dottore. Grazie!'; }
+  try { await rpc('nl_app_data_add', { p_id: SID(), p_tok: A.P.tok, p_kind: 'salute', p_payload: pl }); FB.msg = 'Inviata al Dottore. Grazie!';
+    const e = r.how === 'foto' && FB.last && !FB.last.sent ? FB.last : null;
+    if (e) { const sg = { d: e.d, v: 1, src: 'foto' }; if (e.w != null) sg.w = e.w; if (e.hp != null) sg.hp = e.hp; if (e.bf != null) sg.bf = e.bf; const q = e.p ? fbShrink(e.p) : null; if (q) sg.p = q;
+      if (sg.p || sg.hp != null) { try { await rpc('nl_app_data_add', { p_id: SID(), p_tok: A.P.tok, p_kind: 'sagoma', p_payload: sg }); e.sent = true; FB.msg = sg.p ? 'Inviata al Dottore con la sagoma di profilo (mai le foto). Grazie!' : 'Inviata al Dottore con i fianchi. Grazie!'; }
+        catch (x) { FB.msg = 'Vita e percentuale inviate; la sagoma non è partita: riprova più tardi.'; } } } }
   catch (e) { FB.msg = /empty|invalid/.test(e.message) ? 'Il Dottore non ha ancora attivato la ricezione di questi dati: mostrala alla prossima visita.' : /too_many/.test(e.message) ? 'Hai già inviato molti dati oggi: riprova domani.' : 'Non riesco a collegarmi: riprova.'; }
   FB.sending = false; render(); }
 /* ---- alimentazione dai tracker, dentro «La tua settimana» */
