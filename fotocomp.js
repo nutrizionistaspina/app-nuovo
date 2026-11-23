@@ -12,10 +12,15 @@
      il collo al metro. Vita/altezza e vita/fianchi. La taratura verso la BIA dello studio si applica solo agli adulti.
    - Taratura: retta ai minimi quadrati tra la stima e il riferimento dello studio (metro, BIA), con errore medio stimato
      lasciando fuori una misura alla volta. Si usa da 10 coppie in su.
+   - Versione 2 (23/11/2026): stima dal profilo. Basta la foto di profilo: la profondità dell'addome all'ombelico, con la scala
+     degli esami da foto dello studio (occhi-caviglie = 93% dell'altezza), dà la «vita di profilo» (3,2733 × profondità); con peso
+     e altezza dà la massa grassa in kg, senza peso la percentuale dalla sola forma. I coefficienti vengono dagli esami da foto
+     dello studio (solo numeri aggregati, adulti) e valgono dentro gli intervalli osservati; fuori, e sotto i 18 anni, resta l'RFM.
+     La foto di fronte è facoltativa: aggiunge i fianchi e la vita «come al metro» (ellisse).
    Nessuna dipendenza: funziona nel browser (window.FC) e in Node per i test (module.exports). */
 (function (root) {
   'use strict';
-  const FC = { V: 1, MIN_CAL: 10 };
+  const FC = { V: 2, MIN_CAL: 10, PK: 3.2733, EK: 0.93 };
   const num = (x) => { const v = typeof x === 'number' ? x : parseFloat(String(x ?? '').replace(',', '.')); return isFinite(v) ? v : null; };
   FC.num = num;
 
@@ -30,14 +35,41 @@
     if (sx === 'F') return hip > 0 && w + hip - neck > 0 ? 495 / (1.29579 - 0.35004 * L(w + hip - neck) + 0.221 * L(h)) - 450 : null;
     return null; };
   const bfOk = (v) => (v != null && isFinite(v) ? Math.round(Math.max(3, Math.min(75, v)) * 10) / 10 : null);
+  /* ---------------- stima dal profilo (adulti). vita di profilo = PK × profondità dell'addome (cm, scala degli esami da foto).
+     Con il peso: massa grassa (kg) = k0 + k1 × peso + k2 × altezza + k3 × vita di profilo. Senza peso: % = s0 + s1 × altezza/vita.
+     Coefficienti ai minimi quadrati sugli esami da foto dello studio (n: esami, persone), validati lasciando fuori una persona alla
+     volta (e: scarto medio assoluto e 95% degli scarti; kg = chili, pt = punti di peso, s = punti senza il peso). d: intervalli
+     dentro cui la formula con il peso si usa (quelli degli esami, arrotondati verso l'esterno); fuori non si usa.
+     Riproduce quegli esami, non un metodo di riferimento. */
+  FC.PF = { at: '2026-11-23',
+    F: { n: [55, 25], k: [23.3761, 0.64476, -0.33301, 0.1438], s: [84.1195, -23.74626], d: { age: [20, 70], kg: [42, 111], h: [150, 180], bmi: [17, 39], v: [61, 110], vh: [0.37, 0.69] }, e: { kg: 0.83, kg95: 2.48, pt: 1.24, pt95: 3.48, s: 2.29, s95: 5.82 } },
+    M: { n: [90, 32], k: [-37.8129, 0.07989, 0.01749, 0.57643], s: [72.5096, -22.63384], d: { age: [18, 70], kg: [54, 106], h: [160, 195], bmi: [17, 39], v: [62, 126], vh: [0.35, 0.79] }, e: { kg: 0.84, kg95: 2.12, pt: 0.97, pt95: 2.51, s: 1.6, s95: 3.98 } } };
+  /* { how: 'peso' | 'forma' | null, pct, fm (kg, solo con il peso), out: che cosa è fuori dagli intervalli } */
+  FC.prof = (o) => { const M = FC.PF[o && o.sx], h = num(o && o.h), kg = num(o && o.kg), age = num(o && o.age), dp = num(o && o.dep), v = num(o && o.vita) ?? (dp > 0 ? FC.PK * dp : null);
+    if (!M || !(h > 0) || !(v > 0) || (age != null && age < 18)) return null;
+    const d = M.d, inR = (x, r) => x >= r[0] && x <= r[1], out = [], r = { how: null, pct: null, out };
+    if (age != null && !inR(age, d.age)) out.push('eta');
+    if (kg > 0) { if (!inR(kg, d.kg)) out.push('peso'); if (!inR(h, d.h)) out.push('altezza'); if (!inR(v, d.v)) out.push('vita'); if (!inR(kg / (h / 100) ** 2, d.bmi)) out.push('bmi'); }
+    if (kg > 0 && !out.some((x) => x !== 'eta')) { r.how = 'peso'; r.fm = M.k[0] + M.k[1] * kg + M.k[2] * h + M.k[3] * v; r.pct = r.fm / kg * 100; }
+    else if (inR(v / h, d.vh)) { r.how = 'forma'; r.pct = M.s[0] + M.s[1] * h / v; }
+    else out.push('forma');
+    return r; };
   /* tutti gli indici da altezza, sesso, peso, età e circonferenze (cm) */
-  FC.indices = (o) => { const h = num(o.h), w = num(o.wst), hp = num(o.hip), nk = num(o.neck), kg = num(o.kg), age = num(o.age), r = { warn: [] };
-    if (w && h) r.whtr = Math.round(w / h * 100) / 100;
+  /* wst: vita «come al metro» (metro, o ellisse dalle due foto); dep: profondità dell'addome di profilo (scala degli esami da foto).
+     est è la stima principale: dal profilo (estHow 'peso' o 'forma') negli adulti dentro gli intervalli, altrimenti l'RFM ('rfm') */
+  FC.indices = (o) => { const h = num(o.h), w = num(o.wst), hp = num(o.hip), nk = num(o.neck), kg = num(o.kg), age = num(o.age), dp = num(o.dep), r = { warn: [] };
+    const pv = dp > 0 ? Math.round(FC.PK * dp * 10) / 10 : null, wr = w || pv; if (pv) r.pv = pv;
+    if (wr && h) r.whtr = Math.round(wr / h * 100) / 100;
     if (w && hp) r.whr = Math.round(w / hp * 100) / 100;
     const adult = age == null || age >= 18, kid = age != null && age < 8; if (kid) r.warn.push('minore'); else if (age != null && age < 15) r.warn.push('ped');
-    if (!kid && w && h) { const raw = FC.rfm(h, w, o.sx, age); r.rfm = bfOk(adult && o.cal && o.cal.bf ? FC.cal(raw, o.cal.bf) : raw); }
+    if (!kid && wr && h) { const raw = FC.rfm(h, wr, o.sx, age); r.rfm = bfOk(adult && o.cal && o.cal.bf ? FC.cal(raw, o.cal.bf) : raw); }
     if (adult && nk && w && h) r.navy = bfOk(FC.navy(o.sx, h, w, nk, hp));
-    if (r.rfm != null && kg) { r.fmKg = Math.round(kg * r.rfm) / 100; r.ffmKg = Math.round((kg - kg * r.rfm / 100) * 10) / 10; }
+    if (adult && pv && h) { const f = FC.prof({ sx: o.sx, h, kg, age, vita: pv });
+      if (f && f.how) { r.pfRaw = bfOk(f.pct); r.pf = bfOk(f.how === 'peso' && o.cal && o.cal.pf ? FC.cal(f.pct, o.cal.pf) : f.pct); r.pfHow = f.how; }
+      if (f && f.out.length) r.fuori = f.out; }
+    if (r.pf != null) { r.est = r.pf; r.estHow = r.pfHow; } else if (r.rfm != null) { r.est = r.rfm; r.estHow = 'rfm'; }
+    if (r.est != null && kg) { r.fmKg = Math.round(kg * r.est) / 100; r.ffmKg = Math.round((kg - kg * r.est / 100) * 10) / 10;
+      if (h) { const m2 = (h / 100) ** 2; r.fmi = Math.round(r.fmKg / m2 * 10) / 10; r.ffmi = Math.round(r.ffmKg / m2 * 10) / 10; } }
     return r; };
 
   /* ---------------- taratura */
@@ -92,12 +124,21 @@
       const pr = vis2([27, 28]) || vis2([29, 30]); if (pr && Math.abs(pr[0].x - pr[1].x) * w > 0.12 * H) warn.push('piedi'); }
     /* fianchi molto più larghi della vita: la linea è finita sulle gambe; si riporta all'altezza dell'anca */
     if (lv.hip.x1 - lv.hip.x0 > 1.9 * Math.max(1, lv.waist.x1 - lv.waist.x0)) { const r = FC.runAt(m, w, Math.round(hc), cx); if (r) lv.hip = { y: Math.round(hc), x0: r.x0, x1: r.x1 }; warn.push('fianchi'); }
-    return { top, bot, cx: Math.round(cx), lv, warn, face: view === 's' ? FC.facing(lm) : 1 }; };
+    /* occhi e caviglie dai punti del corpo: servono alla scala degli esami da foto (non dipendono da capelli e piedi) */
+    const ey = lmY(lm, [1, 2, 3, 4, 5, 6], h), an = lmY(lm, [27, 28], h);
+    return { top, bot, cx: Math.round(cx), lv, warn, face: view === 's' ? FC.facing(lm) : 1, eye: ey != null ? Math.round(ey) : null, ank: an != null ? Math.round(an) : null }; };
   /* misure in cm dal modello della foto (cima, talloni, livelli) e dall'altezza */
   FC.measure = (g, hcm) => { if (!g || !(hcm > 0)) return null; const H = g.bot - g.top; if (H < 50) return null; const k = hcm / H, o = { cmpx: k };
-    for (const n of ['waist', 'hip']) { const l = g.lv[n]; if (l) o[n] = Math.round(Math.abs(l.x1 - l.x0) * k * 10) / 10; } return o; };
+    for (const n of ['waist', 'hip']) { const l = g.lv[n]; if (l) o[n] = Math.round(Math.abs(l.x1 - l.x0) * k * 10) / 10; }
+    /* fy porta i centimetri alla scala degli esami da foto (occhi-caviglie = EK × altezza). Se occhi o caviglie non si trovano,
+       o non tornano con la sagoma, vale l'altezza intera: è la stessa scala quando occhi-caviglie sono proprio EK × altezza */
+    const e = g.eye != null && g.ank != null ? (g.ank - g.eye) / H : null, okE = e != null && e > 0.82 && e < 0.97;
+    o.fy = okE ? Math.round(FC.EK / e * 1e4) / 1e4 : 1; o.sc = okE ? 'occhi' : 'altezza'; return o; };
   /* circonferenze dalle due viste, con la taratura dello studio se c'è */
-  FC.circ = (mf, ms, cal) => { if (!mf || !ms) return null; const o = {};
+  /* con il solo profilo (mf assente): one = true, niente vita «come al metro» né fianchi; dep e pv ci sono sempre */
+  FC.circ = (mf, ms, cal) => { if (!ms) return null; const o = {};
+    o.dep = ms.waist > 0 ? Math.round(ms.waist * (ms.fy || 1) * 10) / 10 : null; o.pv = o.dep ? Math.round(FC.PK * o.dep * 10) / 10 : null; o.sc = ms.sc || 'altezza';
+    if (!mf) { o.one = true; o.waist = o.waistRaw = o.hip = o.hipRaw = null; o.ok = o.pv != null && o.pv >= 45 && o.pv <= 200; return o; }
     for (const n of ['waist', 'hip']) { const e = FC.ellipse(mf[n], ms[n]); o[n + 'Raw'] = e != null ? Math.round(e * 10) / 10 : null; o[n] = e != null ? Math.round(FC.cal(e, cal && cal[n]) * 10) / 10 : null; }
     o.ok = o.waist != null && o.waist >= 45 && o.waist <= 200 && (o.hip == null || (o.hip >= 55 && o.hip <= 220)) && ms.waist / mf.waist > 0.35 && ms.waist / mf.waist < 1.6;
     return o; };
@@ -173,7 +214,9 @@
   FC.manual = (w, h) => { const top = Math.round(h * 0.08), bot = Math.round(h * 0.92), H = bot - top, cx = Math.round(w / 2);
     return { top, bot, cx, lv: { waist: { y: Math.round(bot - 0.6 * H), x0: Math.round(cx - 0.09 * H), x1: Math.round(cx + 0.09 * H), man: true }, hip: { y: Math.round(bot - 0.5 * H), x0: Math.round(cx - 0.1 * H), x1: Math.round(cx + 0.1 * H), man: true } }, warn: ['manuale'], face: 1 }; };
   FC.WARN = { braccia: 'Le braccia sembrano attaccate ai fianchi: staccale un po\' nella foto di fronte.', vita: 'La vita trovata è troppo larga: controlla la linea rossa.', piedi: 'Tieni i piedi uniti: con le gambe aperte i fianchi si leggono male. Rifai la foto di fronte.', fianchi: 'La linea blu dei fianchi era sulle gambe: l\'ho riportata sul bacino, controllala.', manuale: 'Non ho trovato la sagoma: sposta tu le linee sui bordi del corpo.', minore: 'Sotto gli 8 anni la percentuale di grasso non si calcola: a questa età la stima non è affidabile.', ped: 'Tra 8 e 14 anni la percentuale di grasso si calcola con la formula per l\'età.' };
-  FC.TIPS = 'Vestiti aderenti, capelli raccolti, piedi uniti. Di fronte: braccia un po\' staccate dal corpo. Di profilo: braccia lungo il corpo, dentro la sagoma. Sfondo chiaro, telefono in verticale all\'altezza della pancia, a 2-3 metri, tutto il corpo nella foto.';
+  FC.TIPS = 'Vestiti aderenti, capelli raccolti, piedi uniti. Di profilo: braccia lungo il corpo, dentro la sagoma, respiro normale senza tirare in dentro la pancia. Di fronte: braccia un po\' staccate dal corpo. Sfondo chiaro, telefono in verticale all\'altezza della pancia, a 2-3 metri, tutto il corpo nella foto.';
+  /* che cosa è fuori dagli intervalli della stima dal profilo, in parole */
+  FC.FUORI = { eta: 'età', peso: 'peso', altezza: 'altezza', vita: 'vita di profilo', bmi: 'rapporto tra peso e altezza', forma: 'forma del profilo' };
 
   if (typeof module === 'object' && module.exports) module.exports = FC; else root.FC = FC;
 })(typeof window !== 'undefined' ? window : globalThis);
